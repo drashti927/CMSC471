@@ -1,32 +1,47 @@
 # CMSC471
 Version Control and Repo for Final Project
 
-# Order Confirmation System (AWS 4-Tier Architecture)
+# Migrate legacy 3-tier image processing to 4-Tier AWS Bedrock serverless architecture
 
 ## Overview
-This project implements a serverless order confirmation system using AWS services including API Gateway, Lambda, Step Functions, DynamoDB, and S3.
+This project modernizes a legacy 3-tier image processing system into a scalable 4-tier cloud-native serverless architecture using AWS services and Amazon Bedrock for AI-powered image processing, orchestration, and distributed data management.
 
 ## Architecture Diagram
 
 ```mermaid
 graph TD
-    User[User Browser] --> S3[S3 Static Frontend]
-    S3 --> APIG[API Gateway]
+    %% Edge & Network
+    User[User] --> R53[Route 53 DNS]
+    R53 --> CF[CloudFront]
+    CF --> S3Web[S3 Static Site]
+    CF --> ALB[Application Load Balancer]
 
-    APIG --> L1[Lambda: Order Handler]
-
-    L1 --> SF[Step Functions Workflow]
-
-    subgraph Workflow
-        SF --> V1[Validate Order]
-        V1 --> V2[Generate Order ID]
-        V2 --> V3[Store in DynamoDB]
-        V3 --> V4[Save to S3 Archive]
+    %% Compute (Tier 2)
+    subgraph VPC [VPC - Public & Private Subnets]
+        ALB --> ASG[EC2 Auto Scaling Group / Docker]
+        ASG --> APIG[API Gateway]
     end
 
-    V3 --> DDB[DynamoDB Orders]
-    V4 --> S3Data[S3 Storage]
+    %% Orchestration & Serverless (Tier 3)
+    APIG --> SF[Step Functions State Machine]
+    subgraph Serverless [Serverless Domain]
+        SF --> L1[Lambda: Fetch Image S3]
+        SF --> L2[Lambda: Invoke Bedrock]
+        SF --> L3[Lambda: Save Results]
+        L2 -.-> Bedrock[Amazon Bedrock AI]
+    end
 
-    CW[CloudWatch Monitoring] -.-> SF
-    CW -.-> L1
+    %% Persistence (Tier 4)
+    L1 -.-> S3Store[S3 Bucket: Images]
+    S3Store -.-> Glacier[S3 Glacier: Archival Compliance]
+    L3 -.-> Aurora[Aurora RDS: Relational Data]
+    L3 -.-> DDB[DynamoDB: Job State/Metadata]
+    
+    %% Analytics & Storage concepts
+    Aurora -.-> Redshift[(Redshift: Analytics Mention)]
+    ASG -.-> EFS[EFS: Shared EC2 Storage]
+
+    %% Monitoring
+    CW[CloudWatch / Trusted Advisor] -.-> VPC
+    CW -.-> Serverless
 ```
