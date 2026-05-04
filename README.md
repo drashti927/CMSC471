@@ -103,7 +103,8 @@ sam delete
 ## Documentation
 
 All required screenshots, diagrams, and written analysis are located in:
-*** docs/ *** 
+
+**docs/** 
    
 This includes:
    - Architecture diagram  
