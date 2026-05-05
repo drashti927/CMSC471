@@ -7,5 +7,5 @@ s3_prefix = "CMSC471HelloStack"
 region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "LabRoleArn=\"arn:aws:iam::877126390547:role/LabRole\""
+parameter_overrides = "LabRoleArn=\"<your-lab-role-arn-here>\""
 image_repositories = []
