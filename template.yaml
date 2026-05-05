@@ -1,1 +1,229 @@
+Transform: AWS::Serverless-2016-10-31
 
+Parameters:
+  LabRoleArn:
+    Type: String
+    Description: The ARN of the LabRole AWS Learner Lab
+    Default: arn:aws:iam::877126390547:role/LabRole
+
+Resources:
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      EndpointConfiguration: REGIONAL
+      Cors:
+        AllowMethods: '''GET,POST,DELETE,OPTIONS'''
+        AllowHeaders: '''Content-Type'''
+        AllowOrigin: '''*'''
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: health_service
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+      Events:
+        HealthApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /api/health
+            Method: GET
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub cmsc471-frontend-${AWS::AccountId}
+
+  StaticProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/proxy
+      Handler: proxy.proxy_handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref Bucket
+      Events:
+        RootRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /
+            Method: GET
+  InboxBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub cmsc471-inbox-${AWS::AccountId}
+
+  LInbox:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/inbox
+      Handler: handler.handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          INBOX_BUCKET_NAME: !Ref InboxBucket
+      Events:
+        InboxGET:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /inbox
+            Method: GET
+        InboxPOST:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /inbox
+            Method: POST
+        InboxDELETE:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /inbox/{key}
+            Method: DELETE
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+
+  RecordsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: recordId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: recordId
+          KeyType: HASH
+  SubmitProcessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/submit
+      Handler: handler.handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref StateMachine
+          JOBS_TABLE_NAME: !Ref JobsTable
+      Events:
+        ProcessPOST:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /process
+            Method: POST
+
+  FetchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/fetch
+      Handler: handler.handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          INBOX_BUCKET_NAME: !Ref InboxBucket
+
+  CallFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/call
+      Handler: handler.handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+
+  SaveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/save
+      Handler: handler.handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          RECORDS_TABLE_NAME: !Ref RecordsTable
+
+  PollFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/poll
+      Handler: handler.handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          JOBS_TABLE_NAME: !Ref JobsTable
+  RecordsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/records
+      Handler: handler.handler
+      Runtime: python3.12
+      Role: !Ref LabRoleArn
+      Environment:
+        Variables:
+          RECORDS_TABLE_NAME: !Ref RecordsTable
+      Events:
+        RecordsGET:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /records
+            Method: GET
+        RecordsDELETE:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /records/{id}
+            Method: DELETE
+  StateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Role: !Ref LabRoleArn
+      Definition:
+        StartAt: Fetch
+        States:
+          Fetch:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: !Ref FetchFunction
+              Payload.$: $
+            Next: Call
+          Call:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: !Ref CallFunction
+              Payload.$: $
+            Next: Save
+          Save:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: !Ref SaveFunction
+              Payload.$: $
+            End: true
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+  FrontendBucket:
+    Value: !Ref Bucket
+  InboxBucket:
+    Value: !Ref InboxBucket
+  StateMachineArn:
+    Value: !Ref StateMachine
